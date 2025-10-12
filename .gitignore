@@ -14,3 +14,6 @@ __pycache__/
 /extracted_anomaly_maps_fastflow_png/
 /postprocessed_anomaly_maps_nifti/
 /prediction_masks_fastflow_nifti/
+/prediction_mask_comparisons_filtered/
+/postprocessed_anomaly_maps_png/
+/filtered_prediction_masks_fastflow/

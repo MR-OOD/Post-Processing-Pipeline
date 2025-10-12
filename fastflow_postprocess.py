@@ -95,6 +95,9 @@ def load_body_mask(path: Path, *, threshold: float) -> np.ndarray:
     """Load a body mask and binarise it using the provided threshold."""
     mask_array = load_array(path)
     mask = mask_array.data
+    if mask.ndim > 2:
+        # Collapse channel or extra trailing dimensions so masking works on 2D slices.
+        mask = np.max(mask, axis=tuple(range(2, mask.ndim))) if mask.ndim > 3 else np.max(mask, axis=-1)
     if np.issubdtype(mask_array.dtype, np.integer):
         max_val = np.iinfo(mask_array.dtype).max
         if max_val > 0:

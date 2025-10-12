@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Visualise raw vs. body-masked prediction masks."""
+"""Visualise raw, body-masked, and filtered prediction masks."""
 from __future__ import annotations
 
 import argparse
@@ -112,6 +112,7 @@ def _overlay_outlines(
 def save_panel(
     raw_path: Path,
     masked_path: Path,
+    filtered_path: Path | None,
     image_path: Path | None,
     ground_truth_path: Path | None,
     dest: Path,
@@ -128,6 +129,7 @@ def save_panel(
 ) -> None:
     raw = _load_mask(raw_path)
     masked = _load_mask(masked_path)
+    filtered = _load_mask(filtered_path) if filtered_path is not None else None
     gt_mask = _load_mask(ground_truth_path) if ground_truth_path is not None else None
 
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -137,6 +139,15 @@ def save_panel(
     diff = masked - raw
     diff_pos = np.clip(diff, 0.0, None)
     diff_norm = _normalize(diff_pos)
+
+    filtered_norm = None
+    filtered_diff_norm = None
+    if filtered is not None:
+        filtered_norm = _normalize(filtered)
+        filtered_diff = filtered - masked
+        filtered_diff_pos = np.clip(filtered_diff, 0.0, None)
+        filtered_diff_norm = _normalize(filtered_diff_pos)
+
     gt_norm = _normalize(gt_mask) if gt_mask is not None else None
 
     from matplotlib import pyplot as plt
@@ -145,8 +156,12 @@ def save_panel(
         panels = [
             ("Raw Prediction Mask", raw_norm),
             ("Body-masked Prediction", masked_norm),
-            ("Masked - Raw", diff_norm),
         ]
+        if filtered_norm is not None:
+            panels.append(("Filtered Prediction", filtered_norm))
+        panels.append(("Masked - Raw", diff_norm))
+        if filtered_diff_norm is not None:
+            panels.append(("Filtered - Body-masked", filtered_diff_norm))
         if gt_norm is not None:
             panels.append(("Ground Truth Mask", gt_norm))
 
@@ -168,6 +183,13 @@ def save_panel(
     masked_overlay = _overlay_outlines(
         image_arr, masked, outline_color, outline_alpha, outline_threshold, outline_thickness
     )
+    filtered_overlay = (
+        _overlay_outlines(
+            image_arr, filtered, outline_color, outline_alpha, outline_threshold, outline_thickness
+        )
+        if filtered is not None
+        else None
+    )
     gt_overlay = None
     if gt_mask is not None:
         gt_overlay = _overlay_outlines(
@@ -179,10 +201,26 @@ def save_panel(
             gt_outline_thickness,
         )
 
-    columns = [("Image", image_arr), ("Raw Outline Overlay", raw_overlay), ("Masked Outline Overlay", masked_overlay)]
-    bottom = [("Raw Heatmap", raw_norm), ("Masked Heatmap", masked_norm), ("Masked - Raw", diff_norm)]
+    columns: list[tuple[str, np.ndarray]] = [
+        ("Image", image_arr),
+        ("Raw Outline Overlay", raw_overlay),
+        ("Body-masked Outline Overlay", masked_overlay),
+    ]
+    bottom: list[tuple[str, np.ndarray]] = [
+        ("Raw Heatmap", raw_norm),
+        ("Body-masked Heatmap", masked_norm),
+        ("Masked - Raw", diff_norm),
+    ]
 
-    if gt_overlay is not None:
+    if filtered_overlay is not None and filtered_norm is not None:
+        columns.append(("Filtered Outline Overlay", filtered_overlay))
+        bottom.append(("Filtered Heatmap", filtered_norm))
+        if filtered_diff_norm is not None:
+            diff_rgb = np.stack([filtered_diff_norm] * 3, axis=-1)
+            columns.append(("Filtered - Body Overlay", diff_rgb))
+            bottom.append(("Filtered - Body-masked", filtered_diff_norm))
+
+    if gt_overlay is not None and gt_norm is not None:
         columns.append(("Ground Truth Overlay", gt_overlay))
         bottom.append(("Ground Truth Mask", gt_norm))
 
@@ -208,6 +246,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Visualise raw vs. filtered prediction masks.")
     parser.add_argument("--raw-dir", type=Path, required=True, help="Directory containing raw prediction masks.")
     parser.add_argument("--masked-dir", type=Path, required=True, help="Directory containing body-masked prediction masks.")
+    parser.add_argument(
+        "--filtered-dir",
+        type=Path,
+        default=None,
+        help="Optional directory containing consecutively-filtered prediction masks.",
+    )
     parser.add_argument("--image-dir", type=Path, default=None, help="Optional dataset root for fetching original images.")
     parser.add_argument(
         "--image-replace",
@@ -476,6 +520,20 @@ def main() -> None:
                 continue
             raise FileNotFoundError(message)
 
+        filtered_path = None
+        if args.filtered_dir is not None:
+            filtered_path, filtered_candidates = _resolve_masked_path(args.filtered_dir, relative)
+            if filtered_path is None:
+                preview = ", ".join(str(path) for path in filtered_candidates[:5])
+                message = (
+                    f"Missing filtered prediction for {relative} "
+                    f"(searched {len(filtered_candidates)} candidates; examples: {preview})"
+                )
+                if args.skip_missing:
+                    print(f"[WARN] {message}")
+                else:
+                    print(f"[WARN] {message}; continuing without filtered stage.")
+
         image_path = None
         if args.image_dir is not None:
             image_path = _resolve_image_path(args.image_dir, raw_path, args.raw_dir, image_replacements)
@@ -496,6 +554,7 @@ def main() -> None:
             save_panel(
                 raw_path,
                 masked_path,
+                filtered_path,
                 image_path,
                 ground_truth_path,
                 dest,
