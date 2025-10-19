@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from pipeline_simplified import MorphologyValidationPipelineSimplified
+from pipeline_tuning import MorphologyValidationPipelineSimplified
 
 
 def main():

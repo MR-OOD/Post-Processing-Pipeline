@@ -1,7 +1,6 @@
 """
-Simplified Validation Pipeline - Direct Morphology Processing
+Validation Pipeline for Tuning 
 
-Skips extract_fastflow and apply_body_mask steps.
 Directly processes pre-computed masked prediction masks.
 
 
@@ -65,9 +64,6 @@ class MorphologyValidationPipelineSimplified:
         
         if not input_dir.exists():
             print(f"[ERROR] Input directory not found: {input_dir}")
-            print("[INFO] Please ensure you have already run:")
-            print("       python extract_fastflow.py --split valid ...")
-            print("       python apply_body_mask.py ...")
             return False
         
         mask_files = list(input_dir.glob("*.png")) + list(input_dir.glob("*.npy"))
@@ -271,7 +267,6 @@ class MorphologyValidationPipelineSimplified:
         print("Starting directly from masked prediction masks")
         print("="*70)
         print(f"Config: {self.config_path}")
-        print(f"Input: ./prediction_masks_fastflow/valid/Ungood/img")
         print("="*70)
         
         # Verify input data exists

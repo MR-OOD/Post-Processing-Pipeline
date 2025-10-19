@@ -1,11 +1,10 @@
 """
-Morphological Post-processing for FastFlow Anomaly Maps
+Morphological Post-processing
 
-Core processing logic: morphological operations (dilation/erosion) + connected component filtering
-for MR metal artifact detection.
+Change: Filter small components BEFORE morphological operations
 
 Data flow:
-  masked pred_mask (0/1 or 0/255) → dilate × N → erode × N → repeat → component filter → output (0/1)
+  masked pred_mask (0/1 or 0/255) → filter small components → dilate × N → erode × N → repeat → output (0/1)
 """
 
 from __future__ import annotations
@@ -21,21 +20,23 @@ from PIL import Image
 class ProcessingStats:
     """Statistics for a single mask processing"""
     original_area: int
+    after_filtering_area: int  # NEW: area after early filtering
     after_morphology_area: int
-    after_filtering_area: int
-    total_components: int
-    kept_components: int
-    removed_components: int
+    final_area: int  # Final output area
+    total_components_original: int  # NEW: components before filtering
+    total_components_filtered: int  # NEW: components after filtering
+    components_removed_early: int  # NEW: removed by early filtering
     area_preserved_ratio: float
     
     def to_dict(self) -> Dict:
         return {
             'original_area': self.original_area,
+            'after_early_filtering': self.after_filtering_area,
             'after_morphology': self.after_morphology_area,
-            'after_filtering': self.after_filtering_area,
-            'components_total': self.total_components,
-            'components_kept': self.kept_components,
-            'components_removed': self.removed_components,
+            'final_area': self.final_area,
+            'components_original': self.total_components_original,
+            'components_after_filtering': self.total_components_filtered,
+            'components_removed_early': self.components_removed_early,
             'area_preserved_ratio': f"{self.area_preserved_ratio:.2%}",
         }
 
@@ -44,11 +45,11 @@ class MorphologyProcessor:
     """
     Morphological processing for binary masks
     
-    Operation sequence (for MR metal detection):
-    1. Dilation × dilate_iterations (expand anomalies, connect fragments)
-    2. Erosion × erode_iterations (restore size, keep connected areas)
-    3. Repeat num_rounds times
-    4. Filter connected components < min_component_size
+    NEW OPERATION SEQUENCE:
+    1. Filter connected components < min_component_size (EARLY NOISE REMOVAL)
+    2. Dilation × dilate_iterations (expand remaining anomalies)
+    3. Erosion × erode_iterations (restore size, keep connected areas)
+    4. Repeat num_rounds times
     """
     
     def __init__(
@@ -98,9 +99,56 @@ class MorphologyProcessor:
             binary = (mask > threshold).astype(np.uint8)
         return binary
     
+    def _filter_small_components(self, mask: np.ndarray) -> Tuple[np.ndarray, Dict]:
+        """
+        Remove connected components with area < min_component_size
+        
+        NEW: This is now called BEFORE morphological operations
+        
+        Returns:
+            filtered_mask: uint8 binary mask {0, 1}
+            stats: dict with component statistics
+        """
+        # Ensure uint8
+        if mask.dtype != np.uint8:
+            binary_mask = (mask > 0).astype(np.uint8) * 255
+        else:
+            # Convert {0,1} to {0,255} for connectedComponentsWithStats
+            binary_mask = mask * 255 if mask.max() <= 1 else mask
+        
+        # Find connected components
+        num_labels, labels_map, stats_cv, centroids = cv2.connectedComponentsWithStats(
+            binary_mask,
+            connectivity=self.connectivity
+        )
+        
+        # Build filtered mask
+        filtered_mask = np.zeros_like(labels_map, dtype=np.uint8)
+        kept = 0
+        removed = 0
+        
+        for label in range(1, num_labels):  # 0 is background
+            area = stats_cv[label, cv2.CC_STAT_AREA]
+            
+            if area >= self.min_component_size:
+                filtered_mask[labels_map == label] = 1
+                kept += 1
+            else:
+                removed += 1
+        
+        stats_dict = {
+            'total_components': num_labels - 1,
+            'kept_components': kept,
+            'removed_components': removed,
+        }
+        
+        return filtered_mask, stats_dict
+    
     def _apply_morphological_ops(self, mask: np.ndarray) -> np.ndarray:
         """
         Apply morphological closing operation num_rounds times
+        
+        NEW: This is now called AFTER filtering small components
         
         Each round: dilation × dilate_iterations → erosion × erode_iterations
         """
@@ -117,48 +165,6 @@ class MorphologyProcessor:
         
         return result
     
-    def _filter_small_components(self, mask: np.ndarray) -> Tuple[np.ndarray, Dict]:
-        """
-        Remove connected components with area < min_component_size
-        
-        Returns:
-            filtered_mask: uint8 binary mask {0, 1}
-            stats: dict with component statistics
-        """
-        # Ensure uint8
-        if mask.dtype != np.uint8:
-            binary_mask = (mask > 0).astype(np.uint8) * 255
-        else:
-            binary_mask = mask
-        
-        # Find connected components
-        num_labels, labels_map, stats, centroids = cv2.connectedComponentsWithStats(
-            binary_mask,
-            connectivity=self.connectivity
-        )
-        
-        # Build filtered mask
-        filtered_mask = np.zeros_like(labels_map, dtype=np.uint8)
-        kept = 0
-        removed = 0
-        
-        for label in range(1, num_labels):  # 0 is background
-            area = stats[label, cv2.CC_STAT_AREA]
-            
-            if area >= self.min_component_size:
-                filtered_mask[labels_map == label] = 1
-                kept += 1
-            else:
-                removed += 1
-        
-        stats_dict = {
-            'total_components': num_labels - 1,
-            'kept_components': kept,
-            'removed_components': removed,
-        }
-        
-        return filtered_mask, stats_dict
-    
     def process(
         self,
         mask: np.ndarray,
@@ -166,6 +172,11 @@ class MorphologyProcessor:
     ) -> Tuple[np.ndarray, ProcessingStats]:
         """
         Process single mask through complete morphology pipeline
+        
+        NEW SEQUENCE:
+        1. Binarize
+        2. Filter small components (EARLY)
+        3. Apply morphological operations
         
         Args:
             mask: Input mask (any range, will be binarized)
@@ -175,30 +186,35 @@ class MorphologyProcessor:
             processed_mask: Output mask (uint8, values 0 or 1)
             stats: Processing statistics
         """
-        # Step 1: Record original area
+        # Step 1: Binarize and record original area
         binary = self._binarize(mask, binarize_threshold)
         original_area = np.count_nonzero(binary)
         
-        # Step 2: Apply morphological operations
-        morpho_result = self._apply_morphological_ops(binary)
-        morpho_area = np.count_nonzero(morpho_result)
+        # Count original components
+        num_labels_orig = cv2.connectedComponents(binary * 255, connectivity=self.connectivity)[0]
+        total_components_original = num_labels_orig - 1  # Exclude background
         
-        # Step 3: Filter small components
-        filtered_result, cc_stats = self._filter_small_components(morpho_result)
-        filtered_area = np.count_nonzero(filtered_result)
+        # Step 2: Filter small components FIRST (EARLY NOISE REMOVAL)
+        filtered_early, cc_stats = self._filter_small_components(binary)
+        filtered_area = np.count_nonzero(filtered_early)
+        
+        # Step 3: Apply morphological operations to filtered mask
+        morpho_result = self._apply_morphological_ops(filtered_early)
+        final_area = np.count_nonzero(morpho_result)
         
         # Step 4: Build statistics
         stats = ProcessingStats(
             original_area=original_area,
-            after_morphology_area=morpho_area,
             after_filtering_area=filtered_area,
-            total_components=cc_stats['total_components'],
-            kept_components=cc_stats['kept_components'],
-            removed_components=cc_stats['removed_components'],
-            area_preserved_ratio=filtered_area / max(original_area, 1),
+            after_morphology_area=final_area,
+            final_area=final_area,  # Same as after_morphology_area in current version
+            total_components_original=total_components_original,
+            total_components_filtered=cc_stats['kept_components'],
+            components_removed_early=cc_stats['removed_components'],
+            area_preserved_ratio=final_area / max(original_area, 1),
         )
         
-        return filtered_result, stats
+        return morpho_result, stats
 
 
 class BatchProcessor:
@@ -245,7 +261,7 @@ class BatchProcessor:
             'failed': 0,
             'failed_files': [],
             'avg_area_preserved': 0,
-            'total_components_removed': 0,
+            'total_components_removed_early': 0,  # NEW
             'individual_stats': []
         }
         
@@ -275,7 +291,7 @@ class BatchProcessor:
                 # Update statistics
                 total_stats['processed'] += 1
                 total_stats['avg_area_preserved'] += stats.area_preserved_ratio
-                total_stats['total_components_removed'] += stats.removed_components
+                total_stats['total_components_removed_early'] += stats.components_removed_early
                 total_stats['individual_stats'].append({
                     'file': mask_file.name,
                     'stats': stats.to_dict()
@@ -312,5 +328,5 @@ class BatchProcessor:
         print(f"Successfully processed: {total_stats['processed']}")
         print(f"Failed: {total_stats['failed']}")
         print(f"Average area preserved: {total_stats['avg_area_preserved']:.2%}")
-        print(f"Total components removed: {total_stats['total_components_removed']}")
+        print(f"Total components removed (early filtering): {total_stats['total_components_removed_early']}")
         print("="*70 + "\n")

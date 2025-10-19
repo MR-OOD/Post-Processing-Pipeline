@@ -4,7 +4,7 @@
 # ============ Paths Configuration ============
 paths:
   #validation_masked_pred_masks
-  output_base: "./prediction_masks_fastflow/valid/Ungood/img"
+  output_base: "./masks_ab/omer"
   
   # Output directories
   visualization_base: "./visualizations"
@@ -47,19 +47,19 @@ tuning_experiments:
     kernel_size: 5
     min_component_size: 3
   
-  - name: "conservative"
-    dilate_iterations: 1
-    erode_iterations: 2
-    num_rounds: 1
-    kernel_size: 5
-    min_component_size: 3
+  # - name: "conservative"
+  #   dilate_iterations: 1
+  #   erode_iterations: 2
+  #   num_rounds: 1
+  #   kernel_size: 5
+  #   min_component_size: 3
   
-  - name: "gentle"
-    dilate_iterations: 1
-    erode_iterations: 1
-    num_rounds: 2
-    kernel_size: 5
-    min_component_size: 3
+  # - name: "gentle"
+  #   dilate_iterations: 1
+  #   erode_iterations: 1
+  #   num_rounds: 2
+  #   kernel_size: 5
+  #   min_component_size: 3
 
 # ============ Visualization Configuration ============
 visualization:
