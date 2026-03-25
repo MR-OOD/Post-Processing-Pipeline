@@ -6,7 +6,7 @@ After tuning on validation set, use this script to apply the optimal parameters
 to all splits (train/valid/test) and categories (Good/Ungood) in any model directory.
 
 Usage Examples:
-    # Apply aggressive parameters to FastFlow model
+    # Apply aggressive parameters
     python apply_morpho.py \
       --model fastflow \
       --experiment aggressive \

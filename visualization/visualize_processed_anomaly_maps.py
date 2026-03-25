@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""CLI to visualise original vs. masked FastFlow anomaly maps."""
+"""CLI to visualise original vs. body-masked anomaly maps."""
 from __future__ import annotations
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import argparse
 from pathlib import Path
 
-from apply_bodymask_fastflow import (
+from apply_bodymask import (
     _parse_replacements,
     visualize_anomaly_pairs,
 )
@@ -13,7 +17,7 @@ from apply_bodymask_fastflow import (
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Visualise original vs. masked FastFlow anomaly maps."
+        description="Visualise original vs. body-masked anomaly maps."
     )
     parser.add_argument(
         "--anomaly-dir",

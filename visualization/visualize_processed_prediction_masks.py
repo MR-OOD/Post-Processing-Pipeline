@@ -2,13 +2,17 @@
 """Visualise raw, body-masked, and filtered prediction masks."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import argparse
 from pathlib import Path
 from typing import Iterable
 
 import numpy as np
 
-from fastflow_postprocess import (
+from postprocess_utils import (
     apply_replacements,
     canonical_suffix,
     load_array,

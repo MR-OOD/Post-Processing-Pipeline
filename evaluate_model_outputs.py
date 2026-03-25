@@ -203,7 +203,7 @@ def compute_anomaly_map_aurocs(
 ) -> dict[str, Any]:
     """Compute pixel-level and image-level AUROCs for raw anomaly maps (pre post-processing)."""
     from compute_pixel_metrics import _resolve_ground_truth_path, _prepare_array, VALID_EXTENSIONS
-    from fastflow_postprocess import canonical_suffix, load_array, project_to_2d
+    from postprocess_utils import canonical_suffix, load_array, project_to_2d
 
     anomaly_files = [
         path

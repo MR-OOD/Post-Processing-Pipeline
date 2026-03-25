@@ -6,7 +6,7 @@ After applying morphology to entire model directory tree, use this script to
 convert all processed PNG masks to 3D NIfTI volumes while preserving directory structure.
 
 Usage Examples:
-    # Stack FastFlow aggressive results
+    # Stack aggressive results
     python batch_stack_to_nifti.py \
       --model fastflow \
       --experiment aggressive \

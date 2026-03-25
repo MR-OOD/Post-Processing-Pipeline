@@ -11,7 +11,7 @@ from typing import Any, Iterable, Sequence
 
 import numpy as np
 
-from fastflow_postprocess import (
+from postprocess_utils import (
     apply_replacements,
     canonical_suffix,
     load_array,

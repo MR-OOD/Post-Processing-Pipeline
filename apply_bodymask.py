@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post-processing utilities for FastFlow anomaly maps.
+"""Post-processing utilities for OOD model anomaly maps.
 
 This module applies body masks to per-image anomaly maps prior to evaluation.
 """
@@ -9,7 +9,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from fastflow_postprocess import (
+from postprocess_utils import (
     apply_mask,
     apply_replacements,
     broadcast_mask,
@@ -197,7 +197,7 @@ def apply_body_mask(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Apply body masks to FastFlow anomaly maps prior to evaluation."
+        description="Apply body masks to anomaly maps prior to evaluation."
     )
     parser.add_argument("--anomaly-dir", type=Path, required=True, help="Directory containing anomaly maps.")
     parser.add_argument("--body-mask-dir", type=Path, required=True, help="Directory with body mask images.")

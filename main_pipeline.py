@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end post-processing pipeline for FastFlow prediction masks.
+"""End-to-end post-processing pipeline for OOD model prediction masks.
 
 This script strings together the existing building blocks:
 1. Apply body masks to the extracted PNG prediction masks.
@@ -20,8 +20,8 @@ from typing import Iterable, Sequence
 from dataclasses import asdict
 import json
 
-from apply_bodymask_fastflow import apply_body_mask
-from fastflow_postprocess import parse_replacements
+from apply_bodymask import apply_body_mask
+from postprocess_utils import parse_replacements
 from filter_prediction_masks_consecutive import filter_prediction_masks
 from morphology.processor import BatchProcessor, MorphologyProcessor
 from morphology.stack_to_3d import BatchNIfTIStacker

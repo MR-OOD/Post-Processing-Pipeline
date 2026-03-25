@@ -17,7 +17,7 @@ import numpy as np
 import yaml
 from PIL import Image
 
-from fastflow_postprocess import apply_replacements, canonical_suffix, load_array
+from postprocess_utils import apply_replacements, canonical_suffix, load_array
 from processor import MorphologyProcessor, BatchProcessor
 from slice_metrics import aggregate_slice_metrics, compute_slice_metrics
 

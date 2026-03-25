@@ -1,12 +1,157 @@
-# OOD Flow Training Utilities
+# Post-Processing Pipeline — MR-OOD Anomaly Detection
 
-## Executive Summary
+## Project Overview
 
-When you already have FastFlow prediction masks (after training/extraction), the full post-processing pipeline is one command away:
+This repository is one part of a three-stage pipeline for MR-only radiotherapy anomaly detection:
+
+**1. Anomaly extraction** (`ood-train/`)
+Flow-based models (CFlow, FastFlow) are trained on normal MR pelvis slices.
+At inference, the model produces per-slice **anomaly maps** (continuous scores, `.npy`)
+and binary **prediction masks** (PNG) for the test set.
+See `../ood-train/README.md` for training and extraction commands.
+
+**2. Post-processing + evaluation** ← this repository
+Raw prediction masks are refined through a multi-stage post-processing pipeline:
+body masking → small-component filtering → morphological closing → consecutive-slice
+(3D persistence) filtering. Pixel-, slice-, and patient-level metrics are computed
+on both raw and post-processed masks and saved as a JSON summary.
+
+**3. Visualization** (scripts included here)
+Scripts to reproduce qualitative figures from the report and presentation
+are located in the root of this repository (see [Visualization](#visualization)).
+Additional figure notebooks live in `../mp_visualizations/`.
+
+---
+
+## Relationship to Other Repositories
+
+| Repository | Role |
+|---|---|
+| `../ood-train` | Model training (CFlow, FastFlow) and anomaly map extraction |
+| `../OOD-Data-Preprocessing` | Dataset preparation (NIfTI→PNG conversion, split creation, body mask generation) |
+| `../mp_visualizations` | Additional analysis notebooks and presentation figures |
+| **this repo** | Post-processing, evaluation, and visualization of model outputs |
+
+---
+
+## Expected Inputs
+
+This repository takes as input the outputs of `ood-train/extract_fastflow.py` (or the CFlow equivalent) — collectively referred to as the model extraction output:
 
 ```
+<extraction_output_root>/
+  anomaly_maps/
+    test/
+      good/img/          ← per-slice anomaly maps as .npy (float32 scores)
+      Ungood/img/        ← per-slice anomaly maps as .npy
+  prediction_masks/
+    test/
+      good/img/          ← binary prediction masks as PNG (0 or 255)
+      Ungood/img/
+```
+
+Body masks (from `OOD-Data-Preprocessing`) must be available at a separate dataset root:
+
+```
+<dataset_root>/
+  test/
+    good/
+      img/               ← source MR slices (PNG or NIfTI)
+      bodymask/          ← binary body masks (PNG), same filenames as img/
+    Ungood/
+      img/
+      bodymask/
+      label/             ← ground-truth anomaly masks (PNG), required for metrics
+```
+
+---
+
+## Output Artifacts
+
+After running the pipeline, the output root contains:
+
+```
+<output_root>/
+  01_body_masked_png/    ← prediction masks after body-mask application
+  02_morphology_png/     ← after small-component filter + morphological closing
+  03_consecutive_filtered_png/  ← final post-processed masks (3D persistence filter)
+  volumes/
+    raw/                 ← 3D NIfTI volumes from raw prediction masks
+    post_processed/      ← 3D NIfTI volumes from post-processed masks
+    ground_truth/        ← 3D NIfTI volumes from ground-truth masks (if provided)
+  metrics/
+    metrics_summary.json ← pixel/slice/patient metrics for both raw and post-processed
+```
+
+---
+
+## Post-Processing Stages
+
+The pipeline applies five sequential stages to the raw binary prediction masks:
+
+| Stage | Script / Module | Description |
+|---|---|---|
+| 0 | `apply_bodymask.py` | Multiply prediction masks element-wise by the anatomical body mask to remove out-of-body detections |
+| 1 | `morphology/processor.py` | Binarize (threshold=0.5) and remove connected components smaller than **τ_area = 3 pixels** |
+| 2 | `morphology/processor.py` | Morphological closing: dilation × N followed by erosion × N (default kernel: 5×5 ellipse, 1 round). Fills small intra-region gaps and smooths contours |
+| 3 | `morphology/stack_to_3d.py` | Stack 2D PNG slices into patient-wise 3D NIfTI volumes |
+| 4 | `filter_prediction_masks_consecutive.py` | 3D persistence filter: discard any 2D connected component that does not overlap with an anomaly region in at least one neighbouring slice |
+
+Default morphology parameters (configurable via CLI or `config/morpho_val.yaml`):
+
+```
+--min-component-size 3      # τ_area: minimum CC size in pixels
+--kernel-size 5             # structuring element size (must be odd)
+--kernel-shape ellipse      # or rect
+--dilate-iterations 1       # dilation passes per round
+--erode-iterations 1        # erosion passes per round
+--num-rounds 1              # number of (dilate+erode) rounds
+```
+
+---
+
+## Evaluation
+
+### Before vs. After Post-Processing
+
+`evaluate_model_outputs.py` computes metrics at three levels:
+
+- **Pixel level**: precision, recall, Dice score, false negative rate, balanced accuracy
+  (aggregated over all prediction–ground-truth pixel pairs)
+- **Slice level**: each 2D slice is classified as positive/negative based on whether
+  any predicted or ground-truth anomaly pixel exists; standard binary classification
+  metrics are reported
+- **Patient level**: mean positive fraction (α_mean) — the average fraction of predicted
+  positive pixels per patient across all their slices. Patients are classified as
+  anomalous if α_mean ≥ threshold. Metrics are reported for multiple thresholds
+  (default: α_mean ∈ {0.0, 0.02, 0.05, 0.1})
+
+`main_pipeline.py` automatically runs evaluation on both the raw input masks and the
+**stage 02 output** (`02_morphology_png`, i.e. after morphological closing), then saves
+both to `metrics/metrics_summary.json`. Stage 03 (`03_consecutive_filtered_png`) is
+the final mask used for 3D NIfTI export and qualitative inspection; metrics are not
+re-evaluated on it (this matches the pipeline design in the report).
+
+### Standalone Metrics
+
+```bash
+python evaluate_model_outputs.py \
+  --prediction-dir post_process_outputs/02_morphology_png \
+  --ground-truth-dir /path/to/dataset/test \
+  --ground-truth-replace img:label \
+  --mean-fraction-thresholds 0.0 0.02 0.05 0.1 \
+  --output-json metrics.json
+```
+
+---
+
+## How to Run
+
+### Full Pipeline (body mask → morphology → 3D filter → metrics)
+
+```bash
 python main_pipeline.py \
-  --input-dir extracted_anomaly_maps_fastflow_png/prediction_masks/test \
+  --input-dir /path/to/prediction_masks/test \
   --body-mask-dir /path/to/dataset/root \
   --output-root post_process_outputs \
   --path-replace prediction_masks:test \
@@ -16,222 +161,116 @@ python main_pipeline.py \
   --skip-missing-body-mask
 ```
 
-1. Applies body masks, morphology, consecutive-slice filtering.
-2. Reconstructs raw & post-processed masks into 3D NIfTI volumes.
-3. Runs `evaluate_model_outputs.py` automatically to produce pixel-, slice-, and patient-level metrics (stored under `metrics/` inside the chosen output root).
+Stage-by-stage PNG outputs land under `post_process_outputs/0*/`, NIfTI volumes
+under `post_process_outputs/volumes/`, and the full metrics summary at
+`post_process_outputs/metrics/metrics_summary.json`.
 
-You’ll find stage-by-stage PNG outputs under `post_process_outputs/0*/...`, NIfTI volumes in `post_process_outputs/volumes/...`, and the metric summary in `post_process_outputs/metrics/metrics_summary.json`.
+### Morphology Parameter Tuning (validation set)
 
-This repository contains training entry points for flow-based anomaly detection models built on [anomalib](https://github.com/openvinotoolkit/anomalib). They are tailored for datasets organised with separate `img/` and `label/` folders (PNG images plus optional pixel-level masks) and focus on two architectures:
+Edit `config/morpho_val.yaml` to set the path to your body-masked validation masks
+and the parameter combinations to test, then run:
 
-- **CFlow** (`train_cflow.py`)
-- **FastFlow** (`train_fastflow.py`)
-
-Both scripts assume a RadImageNet-pretrained backbone but can be used with other backbones exposed by anomalib.
-
-## Dataset Layout
-
-Each dataset root is expected to follow the anomalib folder convention:
-
-```
-<data_root>/
-  train/
-    good/*.png
-    bodymask/*.png              
-
-  valid/
-    good/
-      img/*.png
-      label/*.png              
-      bodymask/*.png          
-    Ungood/
-      img/*.png
-      label/*.png
-      bodymask/*.png
-
-  test/
-    good/
-      img/*.png
-      label/*.png
-      bodymask/*.png
-    Ungood/
-      img/*.png
-      label/*.png
-      bodymask/*.png
+```bash
+python morphology/tune_morpho.py
 ```
 
-If `valid/` exists it is used for evaluation; otherwise the scripts fall back to `test/`. Masks in `label/` are optional but enable pixel-level metrics during FastFlow training. Whole-body masks in `bodymask/` are ignored by the minimal trainers but kept in the layout for compatibility with the fuller pipelines.
+Results are saved to `reports/morphology_tuning/tuning_report.json`.
 
-## Common Arguments
+---
 
-Both scripts share a similar CLI:
+## Visualization
 
-- `--data_root`: Path to the dataset root (default: `/local/scratch/koepchen/synth23_pelvis_v6_png`).
-- `--log_dir`: Base directory where Lightning logs and checkpoints are stored (default: `/home/user/koepchen/OOD_tests`).
-- `--backbone`: Backbone identifier. Values like `radimagenet_resnet50`, `radimagenet_resnet18`, or any backbone supported by the respective model.
-- `--radimagenet_ckpt`: Optional path to a RadImageNet `.pt` checkpoint to seed the backbone weights.
-- `--epochs`: Maximum training epochs.
-- `--batch_size`: Training and evaluation batch size.
-- `--gpu_ids`: (FastFlow only) Comma separated GPU indices (e.g. `0,1`). Use `cpu` to force CPU execution.
-- `--gpu`: GPU index to use (`-1` forces CPU). For FastFlow this flag is deprecated in favour of `--gpu_ids`.
+Visualization scripts live in `visualization/`. They can be run directly from that folder
+(they add the repository root to the Python path automatically).
 
-## Training CFlow on PNGs
+| Script | Output |
+|---|---|
+| `visualization/visualize_processed_anomaly_maps.py` | Side-by-side comparison of original vs. body-masked anomaly maps |
+| `visualization/visualize_processed_prediction_masks.py` | Raw, body-masked, and filtered prediction mask panels |
+| `visualization/visualize_anomaly_thresholded_outputs.py` | Anomaly map next to its thresholded binary output |
+| `visualization/convert_to_bone_colormap.py` | Convert NIfTI slices to bone-colormap PNGs for inspection |
 
-`train_cflow.py` runs CFlow with PNG inputs using anomalib’s `Folder` datamodule.
+Example — visualize before/after body masking:
 
-Example command:
-
-```
-python new_train_cflow.py \
-  --data_root /local/scratch/koepchen/synth23_pelvis_v6_png/synth23_pelvis_v6_png \
-  --backbone radimagenet_resnet50 \
-  --radimagenet_ckpt RadImageNet_pytorch/ResNet50.pt \
-  --epochs 10 \
-  --batch_size 16 \
-  --gpu 0
-```
-
-- CSV metrics land in `<log_dir>/cflow_logs/version_*/metrics.csv`.
-- Lightning’s internal checkpointing still places files under `<log_dir>/cflow_logs/version_*/checkpoints/` (best by `val_loss` plus `last.ckpt` when validation runs).
-- After training the script copies `last.ckpt` (and `best.ckpt` when available) to `<log_dir>/cflow/<dataset_name>_cflow/weights/` and dumps run metadata as `<log_dir>/cflow_logs/version_*/training_run_metadata.json`.
-
-## Training FastFlow on PNG or NIfTI Data
-
-`train_fastflow.py` provides a streamlined FastFlow trainer. It automatically looks for anomaly masks in `label/` directories to enable pixel-level evaluation and now understands datasets stored either as PNGs or NIfTI volumes. When NIfTI files are detected the script mirrors the dataset into a PNG cache so the existing anomalib pipeline continues to work.
-
-Example command (PNG dataset):
-
-```
-python train_fastflow.py \
-  --data_root /local/scratch/koepchen/synth23_pelvis_v6_png/synth23_pelvis_v6_png \
-  --backbone radimagenet_resnet50 \
-  --radimagenet_ckpt RadImageNet_pytorch/ResNet50.pt \
-  --epochs 50 \
-  --batch_size 32 \
-  --gpu_ids 0,1
-```
-
-Example command (NIfTI dataset):
-
-```
-python train_fastflow.py \
-  --data_root /local/scratch/koepchen/synth23_pelvis_v8_nifti \
-  --dataset-format nifti \
-  --conversion-cache-dir /local/scratch/koepchen/fastflow_png_cache \
-  --backbone radimagenet_resnet50 \
-  --radimagenet_ckpt RadImageNet_pytorch/ResNet50.pt \
-  --epochs 50 \
-  --batch_size 32 \
-  --gpu_ids 0,1
-```
-
-Use `--dataset-format` to override automatic detection (`auto`, `png`, or `nifti`) and `--conversion-cache-dir` to control where the PNG mirror is written. The cache directory is reused on subsequent runs unless the source data changes.
-
-The default Lightning checkpointing policy applies (saves best `val_loss` and the latest weights inside `<log_dir>/fastflow_logs/version_*/checkpoints/`). If you prefer a custom location or metric, add a `ModelCheckpoint` callback in the script.
-- CSV metrics land in `<log_dir>/fastflow_logs/version_*/metrics.csv`.
-- Lightning still writes default checkpoints under `<log_dir>/fastflow_logs/version_*/checkpoints/` based on `val_loss` (when available).
-- Additional convenience copies of the latest/best FastFlow weights are written to `<log_dir>/fastflow/<dataset_name>_fastflow/weights/`. The accompanying metadata JSON is stored as `<log_dir>/fastflow_logs/version_*/training_run_metadata.json`.
-
-## RadImageNet Weight Loading
-
-Both scripts reuse `radimagenet_utils.py` to remap RadImageNet state dicts to standard torchvision ResNet module names before loading them into the anomalib models. Provide the `.pt` file via `--radimagenet_ckpt` or skip the flag to train from scratch.
-
-## Notes
-
-- GPU selection is index based. FastFlow accepts `--gpu_ids` for multi-GPU (`--gpu_ids 0,1`) or CPU-only runs (`--gpu_ids cpu`). CFlow continues to use `--gpu` with `-1` forcing CPU.
-- Lightning’s default loggers create CSV metrics inside `<log_dir>/<model>_logs/version_*/metrics.csv` for convenient inspection.
-- FastFlow’s evaluator requires masks only when pixel metrics are enabled; absence of `label/` directories will disable pixel metrics automatically inside anomalib.
-
-For more advanced usage (additional callbacks, mixed precision, distributed training), treat these scripts as starting points and extend them with standard Lightning components.
-
-## Exporting FastFlow Anomaly Maps
-
-After training, use `extract_fastflow.py` to run inference on a split and export per-image anomaly maps as `.npy` files. The CLI mirrors the dataset conversion logic from the trainer, so you can point it to PNG or NIfTI datasets interchangeably.
-
-```
-python extract_fastflow.py \
-  --data_root /local/scratch/koepchen/synth23_pelvis_v8_nifti \
-  --dataset-format nifti \
-  --conversion-cache-dir /local/scratch/koepchen/fastflow_png_cache \
-  --checkpoint fastflow/synth23_pelvis_v8_png_fastflow/weights/best.ckpt \
-  --output_dir extracted_anomaly_maps_fastflow \
-  --split test \
-  --batch_size 8 \
-  --gpu 0 \
-  --map_size 224
-```
-
-The script reconstructs the dataset layout under `--output_dir`, saving `<image>_anomaly_map.npy` beneath `anomaly_maps/<split>/.../img/` and matching prediction masks as PNGs. Use `--map_size` to control the exported spatial resolution (default 224).
-Pass `--mask-output-format nifti` if you prefer the prediction masks in `.nii.gz` form instead of PNG.
-If you have older exports that need tidying, add `--repair-layout` to re-organise existing files into the dataset’s `good/Ungood` folder structure after extraction.
-
-## Post-processing FastFlow Outputs
-
-Run `apply_bodymask_fastflow.py` to multiply anomaly maps (and optional prediction masks) by the anatomical body masks:
-
-```
-python apply_bodymask_fastflow.py \
-  --anomaly-dir extracted_anomaly_maps_fastflow/anomaly_maps \
-  --body-mask-dir /local/scratch/koepchen/synth23_pelvis_v8_png \
-  --output-dir postprocessed_anomaly_maps \
-  --path-replace anomaly_maps:test \
-  --path-replace img:bodymask \
-  --prediction-mask-dir prediction_masks_fastflow
-```
-
-- `--anomaly-dir`: Root of the exported anomaly maps (respects their relative subfolders). Inputs can be PNG images, NumPy arrays (`.npy`/`.npz`), or NIfTI volumes (`.nii`/`.nii.gz`).  
-- `--body-mask-dir`: Root of the dataset containing the body-mask folders; combine with `--path-replace` to swap components (e.g. `anomaly_maps` → `test` and `img` → `bodymask`). Body masks may also live in PNG/NumPy/NIfTI formats.  
-- `--output-dir`: Destination for masked anomaly maps; set `--skip-missing` to ignore slices without masks.  
-- `--prediction-mask-dir`: Applies the body mask to existing prediction masks and writes the result to this directory. Adjust `--raw-prediction-dir` if the raw masks live outside the default `prediction_masks/` tree.
-
-A summary line reports how many anomaly maps were processed and where masked maps (and prediction masks, if requested) were written.
-
-If you already have masked anomaly maps, you can rerun the command with `--masked-dir postprocessed_anomaly_maps/test` and omit `--body-mask-dir` to regenerate prediction masks only.
-
-## Visualising Processed Anomaly Maps
-
-When you only need the qualitative before/after views, use `visualize_processed_anomaly_maps.py`:
-
-```
-python visualize_processed_anomaly_maps.py \
-  --anomaly-dir extracted_anomaly_maps_fastflow/anomaly_maps \
-  --masked-dir postprocessed_anomaly_maps/test \
-  --image-dir /local/scratch/koepchen/synth23_pelvis_v8_png \
+```bash
+python visualization/visualize_processed_anomaly_maps.py \
+  --anomaly-dir /path/to/anomaly_maps/test \
+  --masked-dir post_process_outputs/01_body_masked_png \
+  --image-dir /path/to/dataset \
   --image-replace anomaly_maps:test \
-  --comparison-dir comparisons_fastflow \
-  --overlay-dir overlays_fastflow \
+  --comparison-dir comparisons \
+  --overlay-dir overlays \
   --comparison-cmap magma \
   --overlay-alpha 0.6
 ```
 
-This CLI handles the visualisation (comparison panels and overlays) without modifying the anomaly maps or prediction masks. PNG, NumPy, and NIfTI inputs are detected automatically for both the anomaly maps and the source images.
+Example — visualize raw vs. filtered prediction masks:
 
-## Exporting Prediction Masks
-
-If you need binary prediction masks derived from the masked anomaly maps, reuse the pixel threshold stored in the FastFlow checkpoint:
-
-```
-python export_prediction_masks.py \
-  --masked-dir postprocessed_anomaly_maps/test \
-  --checkpoint fastflow/synth23_pelvis_v8_png_fastflow/weights/best-v2.ckpt \
-  --output-dir prediction_masks_fastflow
-```
-
-This helper thresholds masked anomaly maps using the learned pixel threshold stored in the checkpoint (useful when you are not reusing `apply_bodymask_fastflow.py` for prediction masks).
-
-## Visualising Prediction Masks
-
-`visualize_processed_prediction_masks.py` compares the raw prediction masks with their body-masked counterparts. Example:
-
-```
-python visualize_processed_prediction_masks.py \
-  --raw-dir extracted_anomaly_maps_fastflow/prediction_masks/test \
-  --masked-dir prediction_masks_fastflow/test \
-  --image-dir /local/scratch/koepchen/synth23_pelvis_v8_png \
+```bash
+python visualization/visualize_processed_prediction_masks.py \
+  --raw-dir /path/to/prediction_masks/test \
+  --masked-dir post_process_outputs/01_body_masked_png \
+  --image-dir /path/to/dataset \
   --image-replace prediction_masks:test \
-  --output-dir prediction_mask_comparisons \
-  --cmap magma \
-  --overlay-alpha 0.6
+  --output-dir prediction_mask_comparisons
 ```
 
-Provide `--image-dir`/`--image-replace` if you want overlay panels; otherwise the script produces side-by-side PNGs showing raw vs. body-masked masks without touching the underlying data. Raw/masked/ground-truth masks can be stored as PNG, NumPy arrays, or NIfTI volumes, and dataset images can likewise be in PNG or NIfTI format.
+---
+
+## Repository Structure
+
+```
+Post-Processing-Pipeline/
+│
+├── main_pipeline.py                        # End-to-end pipeline entrypoint
+├── apply_bodymask.py                       # Stage 0: body mask application
+├── postprocess_utils.py                    # Shared I/O and array utilities
+├── filter_prediction_masks_consecutive.py  # Stage 4: 3D persistence filter
+├── evaluate_model_outputs.py               # Pixel/slice/patient metrics
+├── compute_pixel_metrics.py                # Per-slice metric primitives
+│
+├── morphology/                             # Stages 1–3
+│   ├── processor.py                        # MorphologyProcessor, BatchProcessor
+│   ├── stack_to_3d.py                      # BatchNIfTIStacker (2D PNG → 3D NIfTI)
+│   ├── slice_metrics.py                    # Metric helpers
+│   ├── pipeline_tuning.py                  # Tuning pipeline logic
+│   ├── tune_morpho.py                      # Tuning entrypoint
+│   ├── apply_morpho.py                     # Standalone batch apply (legacy, kept)
+│   └── README.md                           # Detailed morphology documentation
+│
+├── visualization/                          # Report and presentation figures
+│   ├── visualize_processed_anomaly_maps.py    # Before/after body-mask comparison
+│   ├── visualize_processed_prediction_masks.py # Raw vs. body-masked vs. filtered masks
+│   ├── visualize_anomaly_thresholded_outputs.py # Anomaly map + threshold overlay
+│   └── convert_to_bone_colormap.py            # NIfTI → bone-colormap PNG
+│
+├── config/
+│   └── morpho_val.yaml                     # Morphology tuning configuration
+│
+├── results/                                # Report figures (comparison.png, table.png)
+├── requirements.txt
+├── README.md
+│
+└── old_code/                               # Unused / superseded files (not deleted)
+    ├── train_cflow.py                      # Training scripts (ood-train domain)
+    ├── train_fastflow.py
+    ├── extract_fastflow.py
+    ├── extract_cflow.py
+    ├── fastflow_dataset.py
+    ├── radimagenet_utils.py
+    ├── apply_bodymask_pred.py              # Superseded by apply_bodymask_fastflow.py
+    ├── PROJECT_BRIEF.md                    # Refactor planning notes
+    ├── config.json                         # Unused placeholder config
+    ├── filtered_metrics.json               # Stale output artifact
+    └── flowchart2.md                       # Draft diagram scratch file
+```
+
+---
+
+## Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+Key packages: `anomalib==2.2.0`, `torch==2.8.0`, `nibabel==5.3.2`, `opencv-python==4.8.1.78`, `scipy==1.10.1`, `scikit-learn`.

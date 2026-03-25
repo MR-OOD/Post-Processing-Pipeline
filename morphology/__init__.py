@@ -1,7 +1,7 @@
 """
 Morphology Post-processing Module
 
-Core components for FastFlow anomaly map post-processing:
+Core components for anomaly map post-processing:
 - MorphologyProcessor: Single-mask processing with morphological operations
 - BatchProcessor: Batch processing of multiple masks
 """

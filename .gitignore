@@ -88,3 +88,6 @@ filtered_metrics.json
 /old_models/
 /exp1_models/
 /old_outputs/
+/exp4/
+/exp4_models/
+/exp4_extract/

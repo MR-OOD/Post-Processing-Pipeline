@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared post-processing utilities for FastFlow anomaly maps and prediction masks."""
+"""Shared post-processing utilities for anomaly maps and prediction masks."""
 
 from __future__ import annotations
 
@@ -269,8 +269,12 @@ def _comparison_figure(
         axis.axis("off")
     fig.tight_layout()
     fig.canvas.draw()
-    width, height = fig.canvas.get_width_height()
-    buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8).reshape(height, width, 3)
+    if hasattr(fig.canvas, "buffer_rgba"):
+        rgba = np.asarray(fig.canvas.buffer_rgba(), dtype=np.uint8)
+        buf = np.ascontiguousarray(rgba[..., :3])
+    else:
+        width, height = fig.canvas.get_width_height()
+        buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8).reshape(height, width, 3)
     plt.close(fig)
     return Image.fromarray(buf)
 
@@ -342,6 +346,147 @@ def visualize_anomaly_pairs(
             overlay_path.parent.mkdir(parents=True, exist_ok=True)
             Image.fromarray((overlay_panel * 255.0).astype(np.uint8)).save(overlay_path)
 
+        processed += 1
+
+    return processed
+
+
+def _candidate_thresholded_relatives(relative: Path) -> list[Path]:
+    """Generate likely filenames for thresholded outputs matching an anomaly-map path."""
+    parent = relative.parent
+    stem_variants = [relative.stem]
+    first = stem_variants[0]
+    if first.endswith("_anomaly_map"):
+        base = first[: -len("_anomaly_map")]
+        stem_variants.extend([base, f"{base}_pred_mask"])
+    elif first.endswith("_pred_mask"):
+        base = first[: -len("_pred_mask")]
+        stem_variants.extend([base, f"{base}_anomaly_map"])
+    else:
+        stem_variants.extend([f"{first}_pred_mask", f"{first}_anomaly_map"])
+
+    ext_priority = [
+        canonical_suffix(relative),
+        relative.suffix.lower(),
+        ".png",
+        ".npy",
+        ".npz",
+        ".nii",
+        ".nii.gz",
+    ]
+    for ext in sorted(VALID_EXTENSIONS):
+        if ext not in ext_priority:
+            ext_priority.append(ext)
+    alt_exts = [ext for ext in ext_priority if ext]
+
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    for stem in stem_variants:
+        for ext in alt_exts:
+            candidate = parent / f"{stem}{ext}"
+            if candidate not in seen:
+                seen.add(candidate)
+                candidates.append(candidate)
+    return candidates
+
+
+def _resolve_thresholded_path(root: Path, relative: Path) -> tuple[Path | None, list[Path]]:
+    candidates = [root / candidate for candidate in _candidate_thresholded_relatives(relative)]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate, candidates
+    return None, candidates
+
+
+def _binarise_for_display(data: np.ndarray, *, source_dtype: np.dtype, threshold: float) -> np.ndarray:
+    """Convert a thresholded output to a binary map in [0, 1] for display."""
+    arr = np.asarray(data, dtype=np.float32)
+    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+    if arr.size == 0:
+        return np.zeros_like(arr, dtype=np.float32)
+
+    unique = np.unique(arr)
+    if unique.size <= 3 and float(np.min(arr)) >= 0.0:
+        return (arr > 0.0).astype(np.float32, copy=False)
+
+    if np.issubdtype(source_dtype, np.integer):
+        info = np.iinfo(source_dtype)
+        scaled = threshold * float(info.max) if threshold <= 1.0 else threshold
+        return (arr >= scaled).astype(np.float32, copy=False)
+
+    return (arr >= threshold).astype(np.float32, copy=False)
+
+
+def visualize_anomaly_thresholded_pairs(
+    *,
+    anomaly_root: Path,
+    comparison_root: Path,
+    threshold: float,
+    comparison_cmap: str,
+    thresholded_root: Path | None = None,
+    image_root: Path | None = None,
+    image_replacements: Mapping[str, str] | None = None,
+    overlay_alpha: float = 0.6,
+    skip_missing: bool = False,
+) -> int:
+    """Create side-by-side figures for anomaly maps and their thresholded outputs."""
+    comparison_root.mkdir(parents=True, exist_ok=True)
+    replacements = image_replacements or {}
+
+    anomaly_files = sorted(
+        path for path in anomaly_root.rglob("*") if path.is_file() and is_supported_file(path)
+    )
+    if not anomaly_files:
+        raise FileNotFoundError(f"No anomaly maps found in {anomaly_root}.")
+
+    processed = 0
+    for anomaly_path in anomaly_files:
+        relative = anomaly_path.relative_to(anomaly_root)
+        anomaly = load_array(anomaly_path)
+        anomaly_2d = project_to_2d(anomaly.data)
+        anomaly_norm = normalise_for_display(anomaly_2d)
+
+        thresholded_path: Path | None = None
+        if thresholded_root is not None:
+            thresholded_path, candidates = _resolve_thresholded_path(thresholded_root, relative)
+            if thresholded_path is None:
+                if skip_missing:
+                    continue
+                preview = ", ".join(str(path) for path in candidates[:5])
+                suffix = " ..." if len(candidates) > 5 else ""
+                raise FileNotFoundError(
+                    f"Missing thresholded output for {relative}. Tried: {preview}{suffix}"
+                )
+            thresholded = load_array(thresholded_path)
+            thresholded_2d = project_to_2d(thresholded.data)
+            thresholded_bin = _binarise_for_display(
+                thresholded_2d, source_dtype=thresholded.dtype, threshold=threshold
+            )
+        else:
+            thresholded_bin = (anomaly_2d >= threshold).astype(np.float32, copy=False)
+
+        thresholded_rgb = np.stack([thresholded_bin] * 3, axis=-1)
+        panels: list[tuple[str, np.ndarray]] = [
+            ("Anomaly Map", anomaly_norm),
+            ("Thresholded Output", thresholded_rgb),
+        ]
+
+        if image_root is not None:
+            image_relative = apply_replacements(relative, replacements)
+            image_path = image_root / image_relative
+            if image_path.exists():
+                overlay = make_overlay(
+                    image_path,
+                    anomaly_2d,
+                    cmap=comparison_cmap,
+                    alpha=overlay_alpha,
+                )
+                panels.append(("Anomaly Overlay", overlay))
+
+        figure = _comparison_figure(panels, cmap=comparison_cmap)
+        comparison_path = comparison_root / relative.with_suffix(".png")
+        comparison_path.parent.mkdir(parents=True, exist_ok=True)
+        figure.save(comparison_path)
         processed += 1
 
     return processed

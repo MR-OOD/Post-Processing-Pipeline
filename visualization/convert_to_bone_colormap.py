@@ -3,6 +3,10 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import argparse
 import shutil
 from pathlib import Path
@@ -16,7 +20,7 @@ except ImportError:  # Older Matplotlib
     mpl_colormaps = None
 from PIL import Image
 
-from fastflow_postprocess import canonical_suffix, normalise_for_display
+from postprocess_utils import canonical_suffix, normalise_for_display
 
 POTENTIAL_MASK_COMPONENTS = {"bodymask", "mask", "label", "labels"}
 NIFTI_SUFFIXES = {".nii", ".nii.gz"}
