@@ -4,6 +4,13 @@ Post-processing and evaluation for binary anomaly prediction masks produced by t
 
 ![Post-Processing Pipeline](image.png)
 
+The pipeline refines raw model predictions in four stages:
+
+1. **Body-mask** — The raw prediction mask is multiplied element-wise by an anatomical body mask derived from the MR volume. This removes spurious detections outside the patient body (e.g. table, air).
+2. **Slice-wise Operations** — Per-slice morphological processing: small isolated components below a minimum pixel area are discarded, then morphological closing fills gaps and smooths region boundaries.
+3. **Volumetric Consistency** — Any 2D anomaly region that does not overlap with a detection in at least one neighbouring slice is removed. This enforces that true anomalies are spatially coherent across the volume.
+4. **Volume Reconstruction** — The final 2D masks are stacked into 3D NIfTI volumes for both the raw and post-processed predictions, enabling downstream volumetric inspection and comparison.
+
 ---
 
 ## Input Structure
