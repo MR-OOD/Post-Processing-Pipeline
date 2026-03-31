@@ -15,64 +15,19 @@ Four controlled experiments were conducted:
 | 3 | Does replacing an ImageNet backbone with a **RadImageNet backbone** improve anomaly detection for pelvic MR? | Swap the frozen WRN50 (ImageNet) encoder in FastFlow for a ResNet50 pretrained on RadImageNet; evaluate across all three input formats |
 | 4 | Do the best single-center configurations **generalize to a multi-center** setting with scanner and protocol variability? | Apply the top model–format combination per family from Exp 2 to a multi-center dataset (centers A + C) and compare against single-center performance |
 
-```mermaid
-flowchart TD
-    DS[("SynthRAD 2023\nPelvis Dataset\n—\nMR · CT · Body Masks")]
+![Experiments Overview](resources/experiments_overview.png)
 
-    subgraph EXP1["Exp 1 — Model Family Benchmark"]
-        direction LR
-        E1["10 models · 5 families\nInput: NIfTI replicated channels\nBackbone: ImageNet · Single center"]
-    end
+Each experiment builds on the previous: Exp 1 establishes the model family ranking; Exp 2 tests whether a different input format improves the best models; Exp 3 isolates the effect of a domain-specific backbone on FastFlow; Exp 4 evaluates generalizability of the best configurations to a multi-center cohort.
 
-    subgraph EXP2["Exp 2 — Input Representation"]
-        direction LR
-        E2["Best model per family\nReplicated  ·  Bone Colormap  ·  2.5D Consecutive\nBackbone: ImageNet · Single center"]
-    end
-
-    subgraph EXP3["Exp 3 — Domain Pre-training"]
-        direction LR
-        E3["FastFlow · all 3 input formats\nImageNet WRN50  vs  RadImageNet ResNet50\nSingle center"]
-    end
-
-    subgraph EXP4["Exp 4 — Multi-Center Generalizability"]
-        direction LR
-        E4["Best model–format per family from Exp 2\nSingle center  vs  Multi center (A + C)\nScanner & protocol variability"]
-    end
-
-    DS --> EXP1 --> EXP2 --> EXP3 --> EXP4
-```
-
-### Full Pipeline Steps
-
-| Step | Stage | Description |
-|------|-------|-------------|
-| 1 | **Pairing** | Match MR, CT, and body mask volumes per patient from SynthRAD 2023 Pelvis |
-| 2 | **Normalization** | Apply body mask to MR, perform min-max normalization (0 → 255) |
-| 3 | **Label Generation** | HU-based CT thresholding + MR signal refinement → binary anomaly masks |
-| 4 | **Geometric Standardization** | Square padding → resize to 240 × 240 → center crop to 224 × 224 |
-| 5 | **Dataset Export** | Organize slices into `train/good`, `valid/good`, `valid/Ungood`, `test` splits |
-| 6 | **Model Training** | One-class training on normal (implant-free) slices only |
-| 7 | **Anomaly Extraction** | Per-slice anomaly maps (continuous score) + prediction masks (binary) |
-| 8 | **Body Masking** | Element-wise multiplication of prediction mask with anatomical body mask |
-| 9 | **Morphological Filtering** | Remove components < 3 px; morphological closing (dilation × N → erosion × N) |
-| 10 | **3D Persistence Filter** | Discard 2D detections with no overlap in either adjacent slice |
-| 11 | **Evaluation** | Pixel / slice / patient Dice, Precision, Recall, FNR, Balanced Accuracy |
-| 12 | **Visualization** | 3D NIfTI volume reconstruction + side-by-side MR / GT / prediction plots |
+![Experiment Design](resources/experiment_design.png)
 
 ---
 
 ## Pipeline Overview
 
-```mermaid
-flowchart LR
-    A["📁 Raw MR / CT Volumes\n(SynthRAD 2023 Pelvis)"]
-    B["🔧 Data Preprocessing\ndata-preprocessing/"]
-    C["🧠 Model Training\nmodel-training/"]
-    D["⚙️ Post-Processing\npost-processing/"]
-    E["📊 Visualization & Evaluation\nvisualizations/"]
+The full project pipeline spans four modules, from raw MR/CT volumes to final evaluation and visualization:
 
-    A --> B --> C --> D --> E
-```
+![Pipeline Overview](resources/pipeline_overview.png)
 
 | Stage | Module | Description |
 | :--- | :--- | :--- |
@@ -87,6 +42,11 @@ flowchart LR
 
 ```
 MR-OOD-Anomaly-Detection/
+│
+├── resources/                   # Diagrams for this README
+│   ├── experiments_overview.png
+│   ├── experiment_design.png
+│   └── pipeline_overview.png
 │
 ├── data-preprocessing/          # Stage 1: MR/CT volume → 2D slice dataset
 │   ├── README.md
@@ -108,8 +68,8 @@ MR-OOD-Anomaly-Detection/
 ├── post-processing/             # Stage 3: Refine masks + evaluate
 │   ├── README.md
 │   ├── main_pipeline.py         # End-to-end pipeline entry point
-│   ├── apply_bodymask.py        # Stage 1: body mask application
-│   ├── filter_prediction_masks_consecutive.py  # Stage 4: 3D persistence filter
+│   ├── apply_bodymask.py        # Body mask application
+│   ├── filter_prediction_masks_consecutive.py  # 3D persistence filter
 │   ├── evaluate_model_outputs.py               # Pixel / slice / patient metrics
 │   ├── compute_pixel_metrics.py
 │   ├── postprocess_utils.py
