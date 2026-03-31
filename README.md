@@ -4,6 +4,63 @@ This repository contains the full pipeline for detecting metallic implant anomal
 
 ---
 
+## Research Objectives, Experiments & Pipeline Overview
+
+Four controlled experiments were conducted:
+
+| # | Research Question | Approach |
+|---|---|---|
+| 1 | Which **anomaly detection model family** performs best for metallic implant detection in pelvic MR? | Benchmark 10 models across 5 families (Normalizing Flow, Knowledge Distillation, Memory Bank, One-Class, Reconstruction) on a shared PNG dataset with an ImageNet backbone |
+| 2 | How does **input channel representation** affect detection performance? | Compare three input formats for the best model: 2D PNG (bone colormap), NIfTI 3-channel replicated, and NIfTI 2.5D consecutive slices |
+| 3 | Does **domain-specific pre-training** improve anomaly detection? | Evaluate an ImageNet-pretrained WRN50 backbone vs. a RadImageNet-pretrained ResNet50 backbone on all three input formats |
+| 4 | How much does **post-processing** improve detection metrics? | Evaluate body masking, morphological closing, and 3D volumetric persistence filtering at pixel, slice, and patient level |
+
+```mermaid
+flowchart TD
+    DS[("SynthRAD 2023\nPelvis Dataset\n—\nMR · CT · Body Masks")]
+
+    subgraph EXP1["Exp 1 — Model Family Benchmark"]
+        direction LR
+        E1["10 models · 5 families\nInput: PNG · Backbone: ImageNet WRN50"]
+    end
+
+    subgraph EXP2["Exp 2 — Input Representation"]
+        direction LR
+        E2["FastFlow\nPNG  ·  NIfTI-Rep  ·  NIfTI-Con\nBackbone: ImageNet WRN50"]
+    end
+
+    subgraph EXP3["Exp 3 — Domain Pre-training"]
+        direction LR
+        E3["FastFlow · all 3 input formats\nImageNet WRN50  vs  RadImageNet ResNet50"]
+    end
+
+    subgraph EXP4["Exp 4 — Post-Processing Impact"]
+        direction LR
+        E4["Best model configuration\nBody Mask → Morphology → 3D Persistence\nPixel · Slice · Patient metrics"]
+    end
+
+    DS --> EXP1 --> EXP2 --> EXP3 --> EXP4
+```
+
+### Full Pipeline Steps
+
+| Step | Stage | Description |
+|------|-------|-------------|
+| 1 | **Pairing** | Match MR, CT, and body mask volumes per patient from SynthRAD 2023 Pelvis |
+| 2 | **Normalization** | Apply body mask to MR, perform min-max normalization (0 → 255) |
+| 3 | **Label Generation** | HU-based CT thresholding + MR signal refinement → binary anomaly masks |
+| 4 | **Geometric Standardization** | Square padding → resize to 240 × 240 → center crop to 224 × 224 |
+| 5 | **Dataset Export** | Organize slices into `train/good`, `valid/good`, `valid/Ungood`, `test` splits |
+| 6 | **Model Training** | One-class training on normal (implant-free) slices only |
+| 7 | **Anomaly Extraction** | Per-slice anomaly maps (continuous score) + prediction masks (binary) |
+| 8 | **Body Masking** | Element-wise multiplication of prediction mask with anatomical body mask |
+| 9 | **Morphological Filtering** | Remove components < 3 px; morphological closing (dilation × N → erosion × N) |
+| 10 | **3D Persistence Filter** | Discard 2D detections with no overlap in either adjacent slice |
+| 11 | **Evaluation** | Pixel / slice / patient Dice, Precision, Recall, FNR, Balanced Accuracy |
+| 12 | **Visualization** | 3D NIfTI volume reconstruction + side-by-side MR / GT / prediction plots |
+
+---
+
 ## Pipeline Overview
 
 ```mermaid
@@ -57,13 +114,16 @@ MR-OOD-Anomaly-Detection/
 │   ├── compute_pixel_metrics.py
 │   ├── postprocess_utils.py
 │   ├── morphology/              # Morphological processing + NIfTI reconstruction
-│   ├── visualization/           # Pipeline-specific figure scripts
 │   ├── config/                  # Morphology tuning configuration
 │   └── results/                 # Pipeline overview diagrams
 │
-├── visualizations/              # Stage 4: Reporting & analysis notebooks
+├── visualizations/              # Stage 4: Reporting & analysis notebooks + scripts
 │   ├── README.md
 │   ├── visualize.py             # CLI tool: 3-panel MR / GT / prediction plots
+│   ├── visualize_processed_prediction_masks.py  # Raw / masked / filtered mask panels
+│   ├── visualize_processed_anomaly_maps.py      # Body-masked anomaly map comparison
+│   ├── visualize_anomaly_thresholded_outputs.py # Anomaly map + thresholded binary
+│   ├── convert_to_bone_colormap.py              # NIfTI → bone-colormap PNG
 │   ├── channel_test.ipynb       # NIfTI channel format diagnostics
 │   ├── dataset_stats.ipynb      # Patient / slice distribution charts
 │   ├── mask_refinement.ipynb    # Mask refinement procedure visualizations
