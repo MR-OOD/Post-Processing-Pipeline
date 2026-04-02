@@ -97,7 +97,15 @@ MR-OOD-Anomaly-Detection/
 
 ## Quick Start
 
-### 1. Preprocess the raw dataset
+### 1. Set up the training environment
+
+```bash
+bash model-training/scripts/setup.sh
+```
+
+See [`model-training/SETUP.md`](model-training/SETUP.md) for manual installation steps and dataset variant configuration.
+
+### 2. Preprocess the raw dataset
 
 ```bash
 # Single-center, PNG output (bone colormap)
@@ -107,14 +115,6 @@ python data-preprocessing/scripts/src/sc_dataset_processing_png.py \
 ```
 
 See [`data-preprocessing/README.md`](data-preprocessing/README.md) for all output formats (PNG, NIfTI replicated, NIfTI consecutive) and multi-center variants.
-
-### 2. Set up the training environment
-
-```bash
-bash model-training/scripts/setup.sh
-```
-
-See [`model-training/SETUP.md`](model-training/SETUP.md) for manual installation steps and dataset variant configuration.
 
 ### 3. Train a model and extract anomaly maps
 
