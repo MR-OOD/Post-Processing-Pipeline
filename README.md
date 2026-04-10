@@ -32,7 +32,7 @@ The full project pipeline spans four modules, from raw MR/CT volumes to final ev
 | Stage | Module | Description |
 | :--- | :--- | :--- |
 | **1 — Preprocessing** | [`data-preprocessing/`](data-preprocessing/README.md) | Converts 3D MR/CT NIfTI volumes into normalised 2D slices (PNG or NIfTI). Generates binary anomaly labels via CT Hounsfield-Unit thresholding refined by the MR signal, and exports body masks for downstream filtering. |
-| **2 — Training** | [`model-training/`](model-training/README.md) | Unified training and feature-extraction pipeline for ten anomaly detection model families: Normalizing Flow (FastFlow, CFlow), Knowledge Distillation (RD4AD, STFPM), Memory Bank (PatchCore, CFA), One-Class (DeepSVDD, CutPaste), and Reconstruction (DRAEM, Dinomaly). |
+| **2 — Training** | [`model-training/`](model-training/README.md) | Unified training and feature-extraction pipeline for ten anomaly detection model families: Normalizing Flow (FastFlow, CFlow), Knowledge Distillation (RD4AD, STFPM), Memory Bank (PatchCore, CFA), One-Class (DeepSVDD, CutPaste), and Reconstruction (DRAEM, Dinomaly). All models were trained following the environment and run commands documented in [`SETUP.md`](model-training/SETUP.md). |
 | **3 — Post-Processing** | [`post-processing/`](post-processing/README.md) | Refines raw binary prediction masks through body masking, morphological closing, and a 3D volumetric persistence filter. Computes pixel-, slice-, and patient-level evaluation metrics. |
 | **4 — Visualization** | [`visualizations/`](visualizations/README.md) | Jupyter notebooks and scripts for dataset statistics, NIfTI channel diagnostics, mask refinement analysis, and standardised side-by-side model prediction comparisons. |
 
