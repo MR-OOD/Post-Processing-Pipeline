@@ -351,11 +351,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             logger.info("Auto-detected anomaly-map directory for AUROC benchmarks: %s", inferred)
             anomaly_map_dir = inferred
 
-    # Normalise thresholds.
     mask_threshold = args.mask_threshold
-    if mask_threshold > 1.0:
-        mask_threshold = mask_threshold / 255.0
-
     replacements = parse_replacements(args.path_replace)
     extra_mask_roots = [path.resolve() for path in args.extra_mask_dir]
 

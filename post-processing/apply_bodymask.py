@@ -251,8 +251,6 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     replacements = parse_replacements(args.path_replace)
     threshold = args.mask_threshold
-    if threshold > 1.0:
-        threshold = threshold / 255.0
 
     prediction_root = args.prediction_mask_dir
     raw_prediction_root = args.raw_prediction_dir
