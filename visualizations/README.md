@@ -38,3 +38,66 @@ python visualize.py \
 ```
 ### Example Vizualization
 ![Example](figures/slice_047.png)
+
+---
+
+## Usage: Post-Processing Visualization
+In addition to the standard visualization pipeline, we provide tools to inspect intermediate and final outputs of the post-processing pipeline, including prediction masks, anomaly maps, and thresholded results.
+
+**`visualize_processed_prediction_masks.py`**: This visualization compares:
+
+- Raw prediction masks (before post-processing)
+- Post-processed masks (after morphology + filtering)
+- Optional overlays with body mask and ground truth
+
+### Command Example
+```bash
+python visualize_processed_prediction_masks.py \
+  --raw-dir volumes/raw/Ungood/img \
+  --masked-dir volumes/post_processed/Ungood/img \
+  --body-mask-dir volumes/ground_truth/Ungood/bodymask \
+  --image-dir volumes/ground_truth/Ungood/img \
+  --ground-truth-dir volumes/ground_truth/Ungood/label \
+  --output-dir ./viz_prediction_masks \
+  --include-all-labels \
+  --skip-missing
+```
+
+### Example Vizualization
+![Example](figures/PA025.nii.png)
+
+---
+
+**`visualize_processed_anomaly_maps.py`**: This visualization compares:
+
+- Original anomaly maps
+- body-masked outputs
+### Command Example
+```bash
+  python visualize_processed_anomaly_maps.py \
+  --anomaly-dir ../volumes/raw/Ungood/img \
+  --masked-dir ../volumes/post_processed/Ungood/img \
+  --image-dir ../volumes/ground_truth/Ungood/img \
+  --comparison-dir ../viz_anomaly_pairs \
+  --skip-missing
+```
+### Example Vizualization
+![Example](figures/PA173.nii.png)
+
+---
+
+**`visualize_anomaly_thresholded_outputs.py`**: This visualization compares:
+- Anomaly map (continuous values)
+- Thresholded output (binary mask)
+- Optional overlay on MR image
+### Command Example
+```bash
+  python visualize_anomaly_thresholded_outputs.py \
+  --anomaly-dir volumes/raw/Ungood/img \
+  --thresholded-dir volumes/post_processed/Ungood/img \
+  --image-dir volumes/ground_truth/Ungood/img \
+  --comparison-dir ./viz_anomaly_thresholded \
+  --skip-missing
+```
+### Example Vizualization
+![Example](figures/PA118.nii.png)

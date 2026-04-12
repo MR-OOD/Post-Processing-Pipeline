@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import argparse
 from pathlib import Path
 
-from postprocess_utils import (
+from post_processing.postprocess_utils import (
     parse_replacements,
     visualize_anomaly_thresholded_pairs,
 )

@@ -12,7 +12,7 @@ from typing import Iterable
 
 import numpy as np
 
-from postprocess_utils import (
+from post_processing.postprocess_utils import (
     apply_replacements,
     canonical_suffix,
     load_array,
@@ -53,14 +53,16 @@ def _normalize(arr: np.ndarray) -> np.ndarray:
 def _load_mask(path: Path) -> np.ndarray:
     array = load_array(path)
     data = array.data.astype(np.float32, copy=False)
+
     if np.issubdtype(array.dtype, np.integer):
-        max_val = np.iinfo(array.dtype).max
-        if max_val > 0:
-            data = data / float(max_val)
+        data_max = float(np.max(data)) if data.size else 0.0
+        if data_max > 1.0:
+            data = data / data_max
     else:
         max_val = float(np.max(np.abs(data))) if data.size else 1.0
         if max_val > 0:
             data = data / max_val
+
     return project_to_2d(data)
 
 

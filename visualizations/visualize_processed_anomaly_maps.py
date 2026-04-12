@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import argparse
 from pathlib import Path
 
-from apply_bodymask import (
+from post_processing.postprocess_utils import (
     _parse_replacements,
     visualize_anomaly_pairs,
 )
